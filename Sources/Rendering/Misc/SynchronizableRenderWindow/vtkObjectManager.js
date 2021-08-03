@@ -114,9 +114,9 @@ function update(type, instance, props, context) {
   }
   const handler = TYPE_HANDLERS[type];
   if (handler && handler.update) {
-    handler.update(instance, props, context);
+    return handler.update(instance, props, context);
   } else {
-    console.log('no updater for', type);
+    return console.log('no updater for', type);
   }
 }
 
@@ -241,6 +241,7 @@ function genericUpdater(instance, state, context) {
     });
   }
 
+  let res = Promise.resolve();
   // if some arrays need to be be fetch
   if (state.arrays) {
     const arraysToBind = [];
@@ -273,6 +274,7 @@ function genericUpdater(instance, state, context) {
       .finally(context.end); // -> end(arraysToBind)
   }
   context.end(); // -> end(generic-updater)
+  return res;
 }
 
 // ----------------------------------------------------------------------------
@@ -447,10 +449,11 @@ function createDataSetUpdate(piecesToFetch = []) {
     instance.getCellData().removeAllArrays();
 
     // Generic handling
-    genericUpdater(instance, state, context);
+    let res = genericUpdater(instance, state, context);
 
     // Finish what we started
     context.end(); // -> end(dataset-update)
+    return res;
   };
 }
 
