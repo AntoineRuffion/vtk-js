@@ -1,4 +1,4 @@
-import macro from 'vtk.js/Sources/macro';
+import macro from 'vtk.js/Sources/macros';
 
 import * as vtkMath from 'vtk.js/Sources/Common/Core/Math';
 import vtkActor from 'vtk.js/Sources/Rendering/Core/Actor';
@@ -24,7 +24,7 @@ function vtkResliceCursorContextRepresentation(publicAPI, model) {
   // --------------------------------------------------------------------------
 
   model.mapper = vtkMapper.newInstance();
-  model.actor = vtkActor.newInstance();
+  model.actor = vtkActor.newInstance({ parentProp: publicAPI });
   model.mapper.setInputConnection(publicAPI.getOutputPort());
   model.actor.setMapper(model.mapper);
   publicAPI.addActor(model.actor);
@@ -33,7 +33,7 @@ function vtkResliceCursorContextRepresentation(publicAPI, model) {
   model.pipelines.center = {
     source: vtkSphereSource.newInstance(),
     mapper: vtkMapper.newInstance(),
-    actor: vtkActor.newInstance(),
+    actor: vtkActor.newInstance({ parentProp: publicAPI }),
   };
   model.pipelines.axes = [];
   // Create axis 1
@@ -41,34 +41,34 @@ function vtkResliceCursorContextRepresentation(publicAPI, model) {
   axis1.line = {
     source: vtkCylinderSource.newInstance(),
     mapper: vtkMapper.newInstance(),
-    actor: vtkActor.newInstance({ pickable: true }),
+    actor: vtkActor.newInstance({ pickable: true, parentProp: publicAPI }),
   };
   axis1.rotation1 = {
     source: vtkSphereSource.newInstance(),
     mapper: vtkMapper.newInstance(),
-    actor: vtkActor.newInstance({ pickable: true }),
+    actor: vtkActor.newInstance({ pickable: true, parentProp: publicAPI }),
   };
   axis1.rotation2 = {
     source: vtkSphereSource.newInstance(),
     mapper: vtkMapper.newInstance(),
-    actor: vtkActor.newInstance({ pickable: true }),
+    actor: vtkActor.newInstance({ pickable: true, parentProp: publicAPI }),
   };
   // Create axis 2
   const axis2 = {};
   axis2.line = {
     source: vtkCylinderSource.newInstance(),
     mapper: vtkMapper.newInstance(),
-    actor: vtkActor.newInstance({ pickable: true }),
+    actor: vtkActor.newInstance({ pickable: true, parentProp: publicAPI }),
   };
   axis2.rotation1 = {
     source: vtkSphereSource.newInstance(),
     mapper: vtkMapper.newInstance(),
-    actor: vtkActor.newInstance({ pickable: true }),
+    actor: vtkActor.newInstance({ pickable: true, parentProp: publicAPI }),
   };
   axis2.rotation2 = {
     source: vtkSphereSource.newInstance(),
     mapper: vtkMapper.newInstance(),
-    actor: vtkActor.newInstance({ pickable: true }),
+    actor: vtkActor.newInstance({ pickable: true, parentProp: publicAPI }),
   };
 
   model.pipelines.axes.push(axis1);
@@ -146,18 +146,23 @@ function vtkResliceCursorContextRepresentation(publicAPI, model) {
     vtkMath.subtract(state.getPoint2(), state.getPoint1(), vector);
     const center = [0, 0, 0];
     vtkMath.multiplyAccumulate(state.getPoint1(), vector, 0.5, center);
-    axis.line.source.setCenter(center);
     const length = vtkMath.normalize(vector);
+    axis.line.source.setCenter(center);
     axis.line.source.setDirection(vector);
-    axis.line.source.setHeight(length);
+    axis.line.source.setHeight(20 * length); // make it an infinite line
 
     // Rotation handles
-    const pixelWorldHeight = publicAPI.getPixelWorldHeightAtCoord(center);
-    const { rendererPixelDims } = model.displayScaleParams;
-    const minDim = Math.min(rendererPixelDims[0], rendererPixelDims[1]);
-    const ratio = 0.5;
-    const distance =
-      (window.devicePixelRatio * (pixelWorldHeight * ratio * minDim)) / 2;
+    const handleDistanceToCenter = 0.5;
+    let distance = 0;
+    if (publicAPI.getScaleInPixels()) {
+      const pixelWorldHeight = publicAPI.getPixelWorldHeightAtCoord(center);
+      const { rendererPixelDims } = model.displayScaleParams;
+      const minDim = Math.min(rendererPixelDims[0], rendererPixelDims[1]);
+      distance = (handleDistanceToCenter * pixelWorldHeight * minDim) / 2;
+    } else {
+      distance = (handleDistanceToCenter * length) / 2;
+    }
+
     const rotationHandlePosition = [];
     vtkMath.multiplyAccumulate(
       center,
@@ -211,17 +216,10 @@ function vtkResliceCursorContextRepresentation(publicAPI, model) {
     outData[0] = vtkPolyData.newInstance();
   };
 
-  publicAPI.updateActorVisibility = (
-    renderingType,
-    wVisible,
-    ctxVisible,
-    hVisible
-  ) => {
+  publicAPI.updateActorVisibility = (renderingType, ctxVisible, hVisible) => {
     const state = model.inputData[0];
     const visibility =
-      renderingType === RenderingTypes.PICKING_BUFFER
-        ? wVisible
-        : wVisible && hVisible;
+      hVisible || renderingType === RenderingTypes.PICKING_BUFFER;
 
     publicAPI.getActors().forEach((actor) => {
       actor.getProperty().setOpacity(state.getOpacity());
@@ -268,6 +266,7 @@ function vtkResliceCursorContextRepresentation(publicAPI, model) {
     const axis2State = state[getAxis2]();
 
     let activeLineState = null;
+    let activeRotationPointName = '';
     let methodName = '';
 
     switch (prop) {
@@ -281,18 +280,22 @@ function vtkResliceCursorContextRepresentation(publicAPI, model) {
         break;
       case model.pipelines.axes[0].rotation1.actor:
         activeLineState = axis1State;
+        activeRotationPointName = 'point1';
         methodName = InteractionMethodsName.RotateLine;
         break;
       case model.pipelines.axes[0].rotation2.actor:
         activeLineState = axis1State;
+        activeRotationPointName = 'point2';
         methodName = InteractionMethodsName.RotateLine;
         break;
       case model.pipelines.axes[1].rotation1.actor:
         activeLineState = axis2State;
+        activeRotationPointName = 'point1';
         methodName = InteractionMethodsName.RotateLine;
         break;
       case model.pipelines.axes[1].rotation2.actor:
         activeLineState = axis2State;
+        activeRotationPointName = 'point2';
         methodName = InteractionMethodsName.RotateLine;
         break;
       default:
@@ -301,6 +304,7 @@ function vtkResliceCursorContextRepresentation(publicAPI, model) {
     }
 
     state.setActiveLineState(activeLineState);
+    state.setActiveRotationPointName(activeRotationPointName);
     state.setUpdateMethodName(methodName);
 
     return state;
